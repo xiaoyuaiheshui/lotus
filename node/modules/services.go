@@ -1,6 +1,8 @@
 package modules
 
 import (
+	"time"
+
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	eventbus "github.com/libp2p/go-eventbus"
@@ -76,13 +78,13 @@ func RunChainExchange(h host.Host, svc exchange.Server) {
 }
 
 func waitForSync(stmgr *stmgr.StateManager, epochs int, subscribe func()) {
-	nearsync := uint64(epochs) * uint64(build.BlockDelaySecs) //nolint
+	nearsync := time.Duration(epochs*int(build.BlockDelaySecs)) * time.Second
 
 	// early check, are we synced at start up?
 	ts := stmgr.ChainStore().GetHeaviestTipSet()
 	timestamp := ts.MinTimestamp()
-	now := uint64(build.Clock.Now().Unix())
-	if timestamp > now-nearsync {
+	timestampTime := time.Unix(int64(timestamp), 0)
+	if build.Clock.Since(timestampTime) < nearsync {
 		subscribe()
 		return
 	}
@@ -101,8 +103,8 @@ func waitForSync(stmgr *stmgr.StateManager, epochs int, subscribe func()) {
 			}
 		}
 
-		now := uint64(build.Clock.Now().Unix())
-		if latest > now-nearsync {
+		latestTime := time.Unix(int64(latest), 0)
+		if build.Clock.Since(latestTime) < nearsync {
 			subscribe()
 			return store.ErrNotifeeDone
 		}
