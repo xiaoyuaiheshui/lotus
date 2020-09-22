@@ -75,6 +75,7 @@
   * [MpoolPush](#MpoolPush)
   * [MpoolPushMessage](#MpoolPushMessage)
   * [MpoolPushUntrusted](#MpoolPushUntrusted)
+  * [MpoolReplaceMessage](#MpoolReplaceMessage)
   * [MpoolSelect](#MpoolSelect)
   * [MpoolSetConfig](#MpoolSetConfig)
   * [MpoolSub](#MpoolSub)
@@ -1841,6 +1842,49 @@ Response:
 ```json
 {
   "/": "bafy2bzacea3wsdh6y3a36tb3skempjoxqpuyompjbmfeyf34fi3uy6uue42v4"
+}
+```
+
+### MpoolReplaceMessage
+MpoolReplaceMessage replaces a pending message with a specific nonce sent by the given sender
+given the new gasLimit, gasFeeCap and gasPremium.
+When any of the fees is set to 0, MpoolReplaceMessage will estimate the appropriate fee
+based on current chain conditions correspondingly.
+Retuens the newly signed message.
+
+
+Perms: sign
+
+Inputs:
+```json
+[
+  "t01234",
+  42,
+  9,
+  "0",
+  "0"
+]
+```
+
+Response:
+```json
+{
+  "Message": {
+    "Version": 42,
+    "To": "t01234",
+    "From": "t01234",
+    "Nonce": 42,
+    "Value": "0",
+    "GasLimit": 9,
+    "GasFeeCap": "0",
+    "GasPremium": "0",
+    "Method": 1,
+    "Params": "Ynl0ZSBhcnJheQ=="
+  },
+  "Signature": {
+    "Type": 2,
+    "Data": "Ynl0ZSBhcnJheQ=="
+  }
 }
 ```
 

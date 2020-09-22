@@ -203,6 +203,13 @@ type FullNode interface {
 	// based on current chain conditions
 	MpoolPushMessage(ctx context.Context, msg *types.Message, spec *MessageSendSpec) (*types.SignedMessage, error)
 
+	// MpoolReplaceMessage replaces a pending message with a specific nonce sent by the given sender
+	// given the new gasLimit, gasFeeCap and gasPremium.
+	// When any of the fees is set to 0, MpoolReplaceMessage will estimate the appropriate fee
+	// based on current chain conditions correspondingly.
+	// Retuens the newly signed message.
+	MpoolReplaceMessage(ctx context.Context, from address.Address, nonce uint64, gasLimit int64, gasFeeCap abi.TokenAmount, gasPremium abi.TokenAmount) (*types.SignedMessage, error)
+
 	// MpoolGetNonce gets next nonce for the specified sender.
 	// Note that this method may not be atomic. Use MpoolPushMessage instead.
 	MpoolGetNonce(context.Context, address.Address) (uint64, error)
