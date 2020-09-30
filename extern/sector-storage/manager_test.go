@@ -198,6 +198,9 @@ func TestRedoPC1(t *testing.T) {
 	_, err = m.SealPreCommit1(ctx, sid, ticket, pieces)
 	require.NoError(t, err)
 
+	// tell mock ffi that we expect PC1 again
+	require.NoError(t, tw.mockSeal.ForceState(sid, 0)) // sectorPacking
+
 	_, err = m.SealPreCommit1(ctx, sid, ticket, pieces)
 	require.NoError(t, err)
 
@@ -262,7 +265,7 @@ func TestRestartManager(t *testing.T) {
 	cwg.Wait()
 	require.Error(t, perr)
 
-	m, lstor, _, _ = newTestMgr(ctx, t, ds)
+	m, _, _, _ = newTestMgr(ctx, t, ds)
 	tw.ret = m // simulate jsonrpc auto-reconnect
 	err = m.AddWorker(ctx, tw)
 	require.NoError(t, err)

@@ -3,7 +3,6 @@ package sectorstorage
 import (
 	"context"
 	"errors"
-	"github.com/filecoin-project/go-statestore"
 	"io"
 	"net/http"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-statestore"
 	"github.com/filecoin-project/specs-storage/storage"
 
 	"github.com/filecoin-project/lotus/extern/sector-storage/ffiwrapper"
@@ -364,15 +364,17 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector abi.SectorID, ticke
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	wk, wait, err := m.getWork(ctx, sealtasks.TTPreCommit1, sector, ticket, pieces)
+	wk, wait, cancel, err := m.getWork(ctx, sealtasks.TTPreCommit1, sector, ticket, pieces)
 	if err != nil {
 		return nil, xerrors.Errorf("getWork: %w", err)
 	}
+	defer cancel()
 
+	var waitErr error
 	waitRes := func() {
 		p, werr := m.waitWork(ctx, wk)
 		if werr != nil {
-			err = werr
+			waitErr = werr
 			return
 		}
 		out = p.(storage.PreCommit1Out)
@@ -380,7 +382,7 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector abi.SectorID, ticke
 
 	if wait { // already in progress
 		waitRes()
-		return
+		return out, waitErr
 	}
 
 	if err := m.index.StorageLock(ctx, sector, storiface.FTUnsealed, storiface.FTSealed|storiface.FTCache); err != nil {
@@ -400,23 +402,28 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector abi.SectorID, ticke
 		waitRes()
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return out, err
+	return out, waitErr
 }
 
 func (m *Manager) SealPreCommit2(ctx context.Context, sector abi.SectorID, phase1Out storage.PreCommit1Out) (out storage.SectorCids, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	wk, wait, err := m.getWork(ctx, sealtasks.TTPreCommit2, sector, phase1Out)
+	wk, wait, cancel, err := m.getWork(ctx, sealtasks.TTPreCommit2, sector, phase1Out)
 	if err != nil {
 		return storage.SectorCids{}, xerrors.Errorf("getWork: %w", err)
 	}
+	defer cancel()
 
+	var waitErr error
 	waitRes := func() {
 		p, werr := m.waitWork(ctx, wk)
 		if werr != nil {
-			err = werr
+			waitErr = werr
 			return
 		}
 		out = p.(storage.SectorCids)
@@ -424,7 +431,7 @@ func (m *Manager) SealPreCommit2(ctx context.Context, sector abi.SectorID, phase
 
 	if wait { // already in progress
 		waitRes()
-		return
+		return out, waitErr
 	}
 
 	if err := m.index.StorageLock(ctx, sector, storiface.FTSealed, storiface.FTCache); err != nil {
@@ -442,22 +449,28 @@ func (m *Manager) SealPreCommit2(ctx context.Context, sector abi.SectorID, phase
 		waitRes()
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return storage.SectorCids{}, err
+	}
+
+	return out, waitErr
 }
 
 func (m *Manager) SealCommit1(ctx context.Context, sector abi.SectorID, ticket abi.SealRandomness, seed abi.InteractiveSealRandomness, pieces []abi.PieceInfo, cids storage.SectorCids) (out storage.Commit1Out, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	wk, wait, err := m.getWork(ctx, sealtasks.TTCommit1, sector, ticket, seed, pieces, cids)
+	wk, wait, cancel, err := m.getWork(ctx, sealtasks.TTCommit1, sector, ticket, seed, pieces, cids)
 	if err != nil {
 		return storage.Commit1Out{}, xerrors.Errorf("getWork: %w", err)
 	}
+	defer cancel()
 
+	var waitErr error
 	waitRes := func() {
 		p, werr := m.waitWork(ctx, wk)
 		if werr != nil {
-			err = werr
+			waitErr = werr
 			return
 		}
 		out = p.(storage.Commit1Out)
@@ -465,7 +478,7 @@ func (m *Manager) SealCommit1(ctx context.Context, sector abi.SectorID, ticket a
 
 	if wait { // already in progress
 		waitRes()
-		return
+		return out, waitErr
 	}
 
 	if err := m.index.StorageLock(ctx, sector, storiface.FTSealed, storiface.FTCache); err != nil {
@@ -486,19 +499,25 @@ func (m *Manager) SealCommit1(ctx context.Context, sector abi.SectorID, ticket a
 		waitRes()
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+
+	return out, waitErr
 }
 
 func (m *Manager) SealCommit2(ctx context.Context, sector abi.SectorID, phase1Out storage.Commit1Out) (out storage.Proof, err error) {
-	wk, wait, err := m.getWork(ctx, sealtasks.TTCommit2, sector, phase1Out)
+	wk, wait, cancel, err := m.getWork(ctx, sealtasks.TTCommit2, sector, phase1Out)
 	if err != nil {
 		return storage.Proof{}, xerrors.Errorf("getWork: %w", err)
 	}
+	defer cancel()
 
+	var waitErr error
 	waitRes := func() {
 		p, werr := m.waitWork(ctx, wk)
 		if werr != nil {
-			err = werr
+			waitErr = werr
 			return
 		}
 		out = p.(storage.Proof)
@@ -506,7 +525,7 @@ func (m *Manager) SealCommit2(ctx context.Context, sector abi.SectorID, phase1Ou
 
 	if wait { // already in progress
 		waitRes()
-		return
+		return out, waitErr
 	}
 
 	selector := newTaskSelector()
@@ -521,7 +540,11 @@ func (m *Manager) SealCommit2(ctx context.Context, sector abi.SectorID, phase1Ou
 		return nil
 	})
 
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+
+	return out, waitErr
 }
 
 func (m *Manager) FinalizeSector(ctx context.Context, sector abi.SectorID, keepUnsealed []storage.Range) error {

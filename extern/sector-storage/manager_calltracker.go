@@ -7,8 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/xerrors"
 	"os"
+
+	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/lotus/extern/sector-storage/sealtasks"
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
@@ -71,10 +72,6 @@ func (m *Manager) setupWorkTracker() {
 
 	for _, st := range ids {
 		wid := st.ID
-		if err := m.work.Get(wid).Get(&st); err != nil {
-			log.Errorf("getting work state for %s", wid)
-			continue
-		}
 
 		if os.Getenv("LOTUS_MINER_ABORT_UNFINISHED_WORK") == "1" {
 			st.Status = wsDone
@@ -102,10 +99,10 @@ func (m *Manager) setupWorkTracker() {
 }
 
 // returns wait=true when the task is already tracked/running
-func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params ...interface{}) (wid WorkID, wait bool, err error) {
+func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params ...interface{}) (wid WorkID, wait bool, cancel func(), err error) {
 	wid, err = newWorkID(method, params)
 	if err != nil {
-		return WorkID{}, false, xerrors.Errorf("creating WorkID: %w", err)
+		return WorkID{}, false, nil, xerrors.Errorf("creating WorkID: %w", err)
 	}
 
 	m.workLk.Lock()
@@ -113,7 +110,7 @@ func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params
 
 	have, err := m.work.Has(wid)
 	if err != nil {
-		return WorkID{}, false, xerrors.Errorf("failed to check if the task is already tracked: %w", err)
+		return WorkID{}, false, nil, xerrors.Errorf("failed to check if the task is already tracked: %w", err)
 	}
 
 	if !have {
@@ -122,15 +119,52 @@ func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params
 			Status: wsStarted,
 		})
 		if err != nil {
-			return WorkID{}, false, xerrors.Errorf("failed to track task start: %w", err)
+			return WorkID{}, false, nil, xerrors.Errorf("failed to track task start: %w", err)
 		}
 
-		return wid, false, nil
+		return wid, false, func() {
+			m.workLk.Lock()
+			defer m.workLk.Unlock()
+
+			have, err := m.work.Has(wid)
+			if err != nil {
+				log.Errorf("cancel: work has error: %+v", err)
+				return
+			}
+
+			if !have {
+				return // expected / happy path
+			}
+
+			var ws WorkState
+			if err := m.work.Get(wid).Get(&ws); err != nil {
+				log.Errorf("cancel: get work %s: %+v", wid, err)
+				return
+			}
+
+			switch ws.Status {
+			case wsStarted:
+				log.Warn("canceling started (not running) work %s", wid)
+
+				if err := m.work.Get(wid).End(); err != nil {
+					log.Errorf("cancel: failed to cancel started work %s: %+v", wid, err)
+					return
+				}
+			case wsDone:
+				// TODO: still remove?
+				log.Warn("cancel called on work %s in 'done' state", wid)
+			case wsRunning:
+				log.Warn("cancel called on work %s in 'running' state (manager shutting down?)", wid)
+			}
+
+		}, nil
 	}
 
 	// already started
 
-	return wid, true, nil
+	return wid, true, func() {
+		// TODO
+	}, nil
 }
 
 func (m *Manager) startWork(ctx context.Context, wk WorkID) func(callID storiface.CallID, err error) error {
@@ -326,7 +360,7 @@ func (m *Manager) returnResult(callID storiface.CallID, r interface{}, serr stri
 
 	_, ok = m.results[wid]
 	if ok {
-		return xerrors.Errorf("result for call %v already reported")
+		return xerrors.Errorf("result for call %v already reported", wid)
 	}
 
 	m.results[wid] = res

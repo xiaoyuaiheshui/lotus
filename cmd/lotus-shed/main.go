@@ -38,6 +38,8 @@ func main() {
 		exportChainCmd,
 		consensusCmd,
 		serveDealStatsCmd,
+		syncCmd,
+		datastoreCmd,
 	}
 
 	app := &cli.App{
