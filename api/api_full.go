@@ -536,6 +536,7 @@ type DealInfo struct {
 	DealID abi.DealID
 
 	CreationTime time.Time
+	Verified     bool
 }
 
 type MsgLookup struct {
