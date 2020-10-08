@@ -41,7 +41,7 @@ require (
 	github.com/filecoin-project/specs-actors v0.9.12
 	github.com/filecoin-project/specs-actors/v2 v2.0.1
 	github.com/filecoin-project/specs-storage v0.1.1-0.20200907031224-ed2e5cd13796
-	github.com/filecoin-project/test-vectors/schema v0.0.3
+	github.com/filecoin-project/test-vectors/schema v0.0.4
 	github.com/gbrlsnchs/jwt/v3 v3.0.0-beta.1
 	github.com/go-kit/kit v0.10.0
 	github.com/go-ole/go-ole v1.2.4 // indirect
@@ -96,8 +96,8 @@ require (
 	github.com/libp2p/go-libp2p-mplex v0.2.4
 	github.com/libp2p/go-libp2p-noise v0.1.1
 	github.com/libp2p/go-libp2p-peerstore v0.2.6
-	github.com/libp2p/go-libp2p-pubsub v0.3.6-0.20200910093904-f7f33e10cc18
-	github.com/libp2p/go-libp2p-quic-transport v0.8.0
+	github.com/libp2p/go-libp2p-pubsub v0.3.6
+	github.com/libp2p/go-libp2p-quic-transport v0.8.2
 	github.com/libp2p/go-libp2p-record v0.1.3
 	github.com/libp2p/go-libp2p-routing-helpers v0.2.3
 	github.com/libp2p/go-libp2p-swarm v0.2.8
