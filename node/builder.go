@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"errors"
-	"os"
 	"time"
 
 	"github.com/filecoin-project/lotus/chain"
@@ -45,6 +44,7 @@ import (
 	"github.com/filecoin-project/lotus/chain/metrics"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/types"
+	"github.com/filecoin-project/lotus/chain/wallet/remotewallet"
 	sectorstorage "github.com/filecoin-project/lotus/extern/sector-storage"
 	"github.com/filecoin-project/lotus/extern/sector-storage/ffiwrapper"
 	"github.com/filecoin-project/lotus/extern/sector-storage/stores"
@@ -73,10 +73,6 @@ import (
 	"github.com/filecoin-project/lotus/storage"
 	"github.com/filecoin-project/lotus/storage/sectorblocks"
 )
-
-// EnvJournalDisabledEvents is the environment variable through which disabled
-// journal events can be customized.
-const EnvJournalDisabledEvents = "LOTUS_JOURNAL_DISABLED_EVENTS"
 
 //nolint:deadcode,varcheck
 var log = logging.Logger("builder")
@@ -167,19 +163,8 @@ type Settings struct {
 func defaults() []Option {
 	return []Option{
 		// global system journal.
-		Override(new(journal.DisabledEvents), func() journal.DisabledEvents {
-			if env, ok := os.LookupEnv(EnvJournalDisabledEvents); ok {
-				if ret, err := journal.ParseDisabledEvents(env); err == nil {
-					return ret
-				}
-			}
-			// fallback if env variable is not set, or if it failed to parse.
-			return journal.DefaultDisabledEvents
-		}),
+		Override(new(journal.DisabledEvents), journal.EnvDisabledEvents),
 		Override(new(journal.Journal), modules.OpenFilesystemJournal),
-		Override(InitJournalKey, func(j journal.Journal) {
-			journal.J = j // eagerly sets the global journal through fx.Invoke.
-		}),
 
 		Override(new(helpers.MetricsCtx), context.Background),
 		Override(new(record.Validator), modules.RecordValidator),
@@ -266,7 +251,9 @@ func Online() Option {
 			Override(new(stmgr.UpgradeSchedule), stmgr.DefaultUpgradeSchedule()),
 			Override(new(*stmgr.StateManager), stmgr.NewStateManagerWithUpgradeSchedule),
 			Override(new(stmgr.StateManagerAPI), From(new(*stmgr.StateManager))),
-			Override(new(*wallet.Wallet), wallet.NewWallet),
+			Override(new(*wallet.LocalWallet), wallet.NewWallet),
+			Override(new(api.WalletAPI), From(new(*wallet.LocalWallet))),
+			Override(new(wallet.Default), From(new(*wallet.LocalWallet))),
 			Override(new(*messagesigner.MessageSigner), messagesigner.NewMessageSigner),
 
 			Override(new(dtypes.ChainGCLocker), blockstore.NewGCLocker),
@@ -473,6 +460,9 @@ func ConfigFullNode(c interface{}) Option {
 		),
 		If(cfg.Metrics.HeadNotifs,
 			Override(HeadMetricsKey, metrics.SendHeadNotifs(cfg.Metrics.Nickname)),
+		),
+		If(cfg.Wallet.RemoteBackend != "",
+			Override(new(api.WalletAPI), remotewallet.SetupRemoteWallet(cfg.Wallet.RemoteBackend)),
 		),
 	)
 }
