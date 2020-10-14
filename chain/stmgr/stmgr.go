@@ -200,6 +200,7 @@ func (sm *StateManager) TipSetState(ctx context.Context, ts *types.TipSet) (st c
 func traceFunc(trace *[]*api.InvocResult) func(mcid cid.Cid, msg *types.Message, ret *vm.ApplyRet) error {
 	return func(mcid cid.Cid, msg *types.Message, ret *vm.ApplyRet) error {
 		ir := &api.InvocResult{
+			MsgCid:         mcid,
 			Msg:            msg,
 			MsgRct:         &ret.MessageReceipt,
 			ExecutionTrace: ret.ExecutionTrace,
@@ -247,17 +248,12 @@ func (sm *StateManager) ApplyBlocks(ctx context.Context, parentEpoch abi.ChainEp
 		return cid.Undef, cid.Undef, xerrors.Errorf("making vm: %w", err)
 	}
 
-	runCron := func() error {
-		// TODO: this nonce-getting is a tiny bit ugly
-		ca, err := vmi.StateTree().GetActor(builtin0.SystemActorAddr)
-		if err != nil {
-			return err
-		}
+	runCron := func(epoch abi.ChainEpoch) error {
 
 		cronMsg := &types.Message{
 			To:         builtin0.CronActorAddr,
 			From:       builtin0.SystemActorAddr,
-			Nonce:      ca.Nonce,
+			Nonce:      uint64(epoch),
 			Value:      types.NewInt(0),
 			GasFeeCap:  types.NewInt(0),
 			GasPremium: types.NewInt(0),
@@ -284,7 +280,7 @@ func (sm *StateManager) ApplyBlocks(ctx context.Context, parentEpoch abi.ChainEp
 	for i := parentEpoch; i < epoch; i++ {
 		if i > parentEpoch {
 			// run cron for null rounds if any
-			if err := runCron(); err != nil {
+			if err := runCron(i); err != nil {
 				return cid.Undef, cid.Undef, err
 			}
 
@@ -350,15 +346,10 @@ func (sm *StateManager) ApplyBlocks(ctx context.Context, parentEpoch abi.ChainEp
 			return cid.Undef, cid.Undef, xerrors.Errorf("failed to serialize award params: %w", err)
 		}
 
-		sysAct, actErr := vmi.StateTree().GetActor(builtin0.SystemActorAddr)
-		if actErr != nil {
-			return cid.Undef, cid.Undef, xerrors.Errorf("failed to get system actor: %w", actErr)
-		}
-
 		rwMsg := &types.Message{
 			From:       builtin0.SystemActorAddr,
 			To:         reward.Address,
-			Nonce:      sysAct.Nonce,
+			Nonce:      uint64(epoch),
 			Value:      types.NewInt(0),
 			GasFeeCap:  types.NewInt(0),
 			GasPremium: types.NewInt(0),
@@ -381,7 +372,7 @@ func (sm *StateManager) ApplyBlocks(ctx context.Context, parentEpoch abi.ChainEp
 		}
 	}
 
-	if err := runCron(); err != nil {
+	if err := runCron(epoch); err != nil {
 		return cid.Cid{}, cid.Cid{}, err
 	}
 
@@ -738,7 +729,7 @@ func (sm *StateManager) searchBackForMsg(ctx context.Context, from *types.TipSet
 			}
 
 			if r != nil {
-				return pts, r, foundMsg, nil
+				return cur, r, foundMsg, nil
 			}
 		}
 
