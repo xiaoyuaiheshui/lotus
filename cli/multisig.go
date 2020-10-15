@@ -23,6 +23,7 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 
 	"github.com/filecoin-project/go-address"
+	cid "github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/xerrors"
@@ -40,6 +41,13 @@ import (
 var multisigCmd = &cli.Command{
 	Name:  "msig",
 	Usage: "Interact with a multisig wallet",
+	Flags: []cli.Flag{
+		&cli.IntFlag{
+			Name:  "confidence",
+			Usage: "number of block confirmations to wait for",
+			Value: int(build.MessageConfidence),
+		},
+	},
 	Subcommands: []*cli.Command{
 		msigCreateCmd,
 		msigInspectCmd,
@@ -56,6 +64,7 @@ var multisigCmd = &cli.Command{
 		msigLockApproveCmd,
 		msigLockCancelCmd,
 		msigVestedCmd,
+		msigProposeThresholdCmd,
 	},
 }
 
@@ -145,7 +154,7 @@ var msigCreateCmd = &cli.Command{
 		}
 
 		// wait for it to get mined into a block
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -409,7 +418,7 @@ var msigProposeCmd = &cli.Command{
 
 		fmt.Println("send proposal in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -445,12 +454,16 @@ var msigApproveCmd = &cli.Command{
 		},
 	},
 	Action: func(cctx *cli.Context) error {
-		if cctx.Args().Len() < 5 {
-			return ShowHelp(cctx, fmt.Errorf("must pass multisig address, message ID, proposer address, destination, and value"))
+		if cctx.Args().Len() < 2 {
+			return ShowHelp(cctx, fmt.Errorf("must pass at least multisig address and message ID"))
 		}
 
 		if cctx.Args().Len() > 5 && cctx.Args().Len() != 7 {
 			return ShowHelp(cctx, fmt.Errorf("usage: msig approve <msig addr> <message ID> <proposer address> <desination> <value> [ <method> <params> ]"))
+		}
+
+		if cctx.Args().Len() > 2 && cctx.Args().Len() != 5 {
+			return ShowHelp(cctx, fmt.Errorf("usage: msig approve <msig addr> <message ID> <proposer address> <desination> <value>"))
 		}
 
 		api, closer, err := GetFullNodeAPI(cctx)
@@ -470,44 +483,6 @@ var msigApproveCmd = &cli.Command{
 			return err
 		}
 
-		proposer, err := address.NewFromString(cctx.Args().Get(2))
-		if err != nil {
-			return err
-		}
-
-		if proposer.Protocol() != address.ID {
-			proposer, err = api.StateLookupID(ctx, proposer, types.EmptyTSK)
-			if err != nil {
-				return err
-			}
-		}
-
-		dest, err := address.NewFromString(cctx.Args().Get(3))
-		if err != nil {
-			return err
-		}
-
-		value, err := types.ParseFIL(cctx.Args().Get(4))
-		if err != nil {
-			return err
-		}
-
-		var method uint64
-		var params []byte
-		if cctx.Args().Len() == 7 {
-			m, err := strconv.ParseUint(cctx.Args().Get(5), 10, 64)
-			if err != nil {
-				return err
-			}
-			method = m
-
-			p, err := hex.DecodeString(cctx.Args().Get(6))
-			if err != nil {
-				return err
-			}
-			params = p
-		}
-
 		var from address.Address
 		if cctx.IsSet("from") {
 			f, err := address.NewFromString(cctx.String("from"))
@@ -523,14 +498,60 @@ var msigApproveCmd = &cli.Command{
 			from = defaddr
 		}
 
-		msgCid, err := api.MsigApproveTxnHash(ctx, msig, txid, proposer, dest, types.BigInt(value), from, method, params)
-		if err != nil {
-			return err
+		var msgCid cid.Cid
+		if cctx.Args().Len() == 2 {
+			msgCid, err = api.MsigApprove(ctx, msig, txid, from)
+			if err != nil {
+				return err
+			}
+		} else {
+			proposer, err := address.NewFromString(cctx.Args().Get(2))
+			if err != nil {
+				return err
+			}
+
+			if proposer.Protocol() != address.ID {
+				proposer, err = api.StateLookupID(ctx, proposer, types.EmptyTSK)
+				if err != nil {
+					return err
+				}
+			}
+
+			dest, err := address.NewFromString(cctx.Args().Get(3))
+			if err != nil {
+				return err
+			}
+
+			value, err := types.ParseFIL(cctx.Args().Get(4))
+			if err != nil {
+				return err
+			}
+
+			var method uint64
+			var params []byte
+			if cctx.Args().Len() == 7 {
+				m, err := strconv.ParseUint(cctx.Args().Get(5), 10, 64)
+				if err != nil {
+					return err
+				}
+				method = m
+
+				p, err := hex.DecodeString(cctx.Args().Get(6))
+				if err != nil {
+					return err
+				}
+				params = p
+			}
+
+			msgCid, err = api.MsigApproveTxnHash(ctx, msig, txid, proposer, dest, types.BigInt(value), from, method, params)
+			if err != nil {
+				return err
+			}
 		}
 
 		fmt.Println("sent approval in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -601,7 +622,7 @@ var msigRemoveProposeCmd = &cli.Command{
 
 		fmt.Println("sent remove proposal in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -679,7 +700,7 @@ var msigAddProposeCmd = &cli.Command{
 
 		fmt.Fprintln(cctx.App.Writer, "sent add proposal in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -761,7 +782,7 @@ var msigAddApproveCmd = &cli.Command{
 
 		fmt.Println("sent add approval in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -838,7 +859,7 @@ var msigAddCancelCmd = &cli.Command{
 
 		fmt.Println("sent add cancellation in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -910,7 +931,7 @@ var msigSwapProposeCmd = &cli.Command{
 
 		fmt.Println("sent swap proposal in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -992,7 +1013,7 @@ var msigSwapApproveCmd = &cli.Command{
 
 		fmt.Println("sent swap approval in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -1069,7 +1090,7 @@ var msigSwapCancelCmd = &cli.Command{
 
 		fmt.Println("sent swap cancellation in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -1156,7 +1177,7 @@ var msigLockProposeCmd = &cli.Command{
 
 		fmt.Println("sent lock proposal in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -1253,7 +1274,7 @@ var msigLockApproveCmd = &cli.Command{
 
 		fmt.Println("sent lock approval in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -1345,7 +1366,7 @@ var msigLockCancelCmd = &cli.Command{
 
 		fmt.Println("sent lock cancellation in message: ", msgCid)
 
-		wait, err := api.StateWaitMsg(ctx, msgCid, build.MessageConfidence)
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
 		if err != nil {
 			return err
 		}
@@ -1415,6 +1436,81 @@ var msigVestedCmd = &cli.Command{
 		}
 
 		fmt.Printf("Vested: %s between %d and %d\n", types.FIL(ret), start.Height(), end.Height())
+
+		return nil
+	},
+}
+
+var msigProposeThresholdCmd = &cli.Command{
+	Name:      "propose-threshold",
+	Usage:     "Propose setting a different signing threshold on the account",
+	ArgsUsage: "<multisigAddress newM>",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "from",
+			Usage: "account to send the proposal from",
+		},
+	},
+	Action: func(cctx *cli.Context) error {
+		if cctx.Args().Len() != 2 {
+			return ShowHelp(cctx, fmt.Errorf("must pass multisig address and new threshold value"))
+		}
+
+		api, closer, err := GetFullNodeAPI(cctx)
+		if err != nil {
+			return err
+		}
+		defer closer()
+		ctx := ReqContext(cctx)
+
+		msig, err := address.NewFromString(cctx.Args().Get(0))
+		if err != nil {
+			return err
+		}
+
+		newM, err := strconv.ParseUint(cctx.Args().Get(1), 10, 64)
+		if err != nil {
+			return err
+		}
+
+		var from address.Address
+		if cctx.IsSet("from") {
+			f, err := address.NewFromString(cctx.String("from"))
+			if err != nil {
+				return err
+			}
+			from = f
+		} else {
+			defaddr, err := api.WalletDefaultAddress(ctx)
+			if err != nil {
+				return err
+			}
+			from = defaddr
+		}
+
+		params, actErr := actors.SerializeParams(&msig0.ChangeNumApprovalsThresholdParams{
+			NewThreshold: newM,
+		})
+
+		if actErr != nil {
+			return actErr
+		}
+
+		msgCid, err := api.MsigPropose(ctx, msig, msig, types.NewInt(0), from, uint64(builtin2.MethodsMultisig.ChangeNumApprovalsThreshold), params)
+		if err != nil {
+			return fmt.Errorf("failed to propose change of threshold: %w", err)
+		}
+
+		fmt.Println("sent change threshold proposal in message: ", msgCid)
+
+		wait, err := api.StateWaitMsg(ctx, msgCid, uint64(cctx.Int("confidence")))
+		if err != nil {
+			return err
+		}
+
+		if wait.Receipt.ExitCode != 0 {
+			return fmt.Errorf("change threshold proposal returned exit %d", wait.Receipt.ExitCode)
+		}
 
 		return nil
 	},
