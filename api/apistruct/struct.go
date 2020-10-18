@@ -5,8 +5,7 @@ import (
 	"io"
 	"time"
 
-	stnetwork "github.com/filecoin-project/go-state-types/network"
-
+	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
 	metrics "github.com/libp2p/go-libp2p-core/metrics"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -25,6 +24,7 @@ import (
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/crypto"
 	"github.com/filecoin-project/go-state-types/dline"
+	stnetwork "github.com/filecoin-project/go-state-types/network"
 	"github.com/filecoin-project/lotus/extern/sector-storage/fsutil"
 	"github.com/filecoin-project/lotus/extern/sector-storage/sealtasks"
 	"github.com/filecoin-project/lotus/extern/sector-storage/stores"
@@ -68,6 +68,7 @@ type CommonStruct struct {
 		LogSetLevel func(context.Context, string, string) error `perm:"write"`
 
 		Shutdown func(context.Context) error                    `perm:"admin"`
+		Session  func(context.Context) (uuid.UUID, error)       `perm:"read"`
 		Closing  func(context.Context) (<-chan struct{}, error) `perm:"read"`
 	}
 }
@@ -295,9 +296,9 @@ type StorageMinerStruct struct {
 		SectorRemove                  func(context.Context, abi.SectorNumber) error                                                 `perm:"admin"`
 		SectorMarkForUpgrade          func(ctx context.Context, id abi.SectorNumber) error                                          `perm:"admin"`
 
-		WorkerConnect func(context.Context, string) error                             `perm:"admin" retry:"true"` // TODO: worker perm
-		WorkerStats   func(context.Context) (map[uint64]storiface.WorkerStats, error) `perm:"admin"`
-		WorkerJobs    func(context.Context) (map[int64][]storiface.WorkerJob, error)  `perm:"admin"`
+		WorkerConnect func(context.Context, string) error                                `perm:"admin" retry:"true"` // TODO: worker perm
+		WorkerStats   func(context.Context) (map[uuid.UUID]storiface.WorkerStats, error) `perm:"admin"`
+		WorkerJobs    func(context.Context) (map[uuid.UUID][]storiface.WorkerJob, error) `perm:"admin"`
 
 		ReturnAddPiece        func(ctx context.Context, callID storiface.CallID, pi abi.PieceInfo, err string) error          `perm:"admin" retry:"true"`
 		ReturnSealPreCommit1  func(ctx context.Context, callID storiface.CallID, p1o storage.PreCommit1Out, err string) error `perm:"admin" retry:"true"`
@@ -375,7 +376,7 @@ type WorkerStruct struct {
 		Remove          func(ctx context.Context, sector abi.SectorID) error `perm:"admin"`
 		StorageAddLocal func(ctx context.Context, path string) error         `perm:"admin"`
 
-		Closing func(context.Context) (<-chan struct{}, error) `perm:"admin"`
+		Session func(context.Context) (uuid.UUID, error) `perm:"admin"`
 	}
 }
 
@@ -488,6 +489,10 @@ func (c *CommonStruct) LogSetLevel(ctx context.Context, group, level string) err
 
 func (c *CommonStruct) Shutdown(ctx context.Context) error {
 	return c.Internal.Shutdown(ctx)
+}
+
+func (c *CommonStruct) Session(ctx context.Context) (uuid.UUID, error) {
+	return c.Internal.Session(ctx)
 }
 
 func (c *CommonStruct) Closing(ctx context.Context) (<-chan struct{}, error) {
@@ -1195,11 +1200,11 @@ func (c *StorageMinerStruct) WorkerConnect(ctx context.Context, url string) erro
 	return c.Internal.WorkerConnect(ctx, url)
 }
 
-func (c *StorageMinerStruct) WorkerStats(ctx context.Context) (map[uint64]storiface.WorkerStats, error) {
+func (c *StorageMinerStruct) WorkerStats(ctx context.Context) (map[uuid.UUID]storiface.WorkerStats, error) {
 	return c.Internal.WorkerStats(ctx)
 }
 
-func (c *StorageMinerStruct) WorkerJobs(ctx context.Context) (map[int64][]storiface.WorkerJob, error) {
+func (c *StorageMinerStruct) WorkerJobs(ctx context.Context) (map[uuid.UUID][]storiface.WorkerJob, error) {
 	return c.Internal.WorkerJobs(ctx)
 }
 
@@ -1485,8 +1490,8 @@ func (w *WorkerStruct) StorageAddLocal(ctx context.Context, path string) error {
 	return w.Internal.StorageAddLocal(ctx, path)
 }
 
-func (w *WorkerStruct) Closing(ctx context.Context) (<-chan struct{}, error) {
-	return w.Internal.Closing(ctx)
+func (w *WorkerStruct) Session(ctx context.Context) (uuid.UUID, error) {
+	return w.Internal.Session(ctx)
 }
 
 func (g GatewayStruct) ChainHasObj(ctx context.Context, c cid.Cid) (bool, error) {
