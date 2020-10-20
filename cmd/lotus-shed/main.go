@@ -42,6 +42,7 @@ func main() {
 		stateTreePruneCmd,
 		datastoreCmd,
 		ledgerCmd,
+		electionCmd,
 	}
 
 	app := &cli.App{
